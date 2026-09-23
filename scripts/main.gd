@@ -48,9 +48,19 @@ var is_dragging: bool = false
 var drag_start_mouse: Vector2
 var drag_start_cam: Vector2
 
-const ZOOM_MIN := 0.5
+## 觸控：目前按著的手指（index -> 螢幕座標），兩指時進行縮放與平移
+var touches: Dictionary = {}
+## 戰鬥中的點擊在放開時才生效，避免雙指縮放時第一根手指誤觸
+var click_pending: bool = false
+var click_press_pos: Vector2
+## 最近一次滑鼠（或觸控模擬滑鼠）事件的螢幕座標；不依賴作業系統游標，觸控裝置上也正確
+var pointer_screen: Vector2
+
+const ZOOM_MIN := 0.4
 const ZOOM_MAX := 2.0
 const ZOOM_STEP := 0.1
+## 按下到放開移動超過此距離（像素）就不視為點擊
+const CLICK_SLOP := 16.0
 const DEFAULT_INFO := "Select a unit, click a highlighted tile to move, then attack or wait. Middle-drag to pan, wheel to zoom."
 const DEPLOY_INFO := "Drag your unit from the bench onto the blue deploy zone. Drag it again to reposition, or back to the bench to undeploy."
 const ATTACK_INFO := "Click a red enemy to attack, or click elsewhere to wait."
@@ -204,12 +214,12 @@ func _begin_drag(unit: Unit, origin: Vector2i) -> void:
 	drag_origin = origin
 	unit.z_index = 10
 	unit.modulate.a = 0.75
-	unit.position = get_global_mouse_position()
+	unit.position = _pointer_world()
 	_update_drop_preview()
 
 func _update_drop_preview() -> void:
-	drag_unit.position = get_global_mouse_position()
-	var coord := hex_map.pixel_to_axial(get_global_mouse_position())
+	drag_unit.position = _pointer_world()
+	var coord := hex_map.pixel_to_axial(_pointer_world())
 	if _is_mouse_over_bench() or not hex_map.has_tile(coord):
 		hex_map.hovered_coord = HexMap.NO_COORD
 		hex_map.drop_state = HexMap.DropState.NONE
@@ -224,12 +234,15 @@ func _can_drop_at(coord: Vector2i) -> bool:
 	var occupant := get_unit_at(coord)
 	return occupant == null or not occupant.is_enemy
 
+func _pointer_world() -> Vector2:
+	return get_canvas_transform().affine_inverse() * pointer_screen
+
 func _is_mouse_over_bench() -> bool:
-	return bench.visible and bench.get_global_rect().has_point(get_viewport().get_mouse_position())
+	return bench.visible and bench.get_global_rect().has_point(pointer_screen)
 
 func _end_drag() -> void:
 	var unit := drag_unit
-	var coord := hex_map.pixel_to_axial(get_global_mouse_position())
+	var coord := hex_map.pixel_to_axial(_pointer_world())
 	drag_unit = null
 	unit.z_index = 0
 	unit.modulate.a = 1.0
@@ -256,6 +269,8 @@ func _end_drag() -> void:
 	_refresh_deploy_ui()
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouse:
+		pointer_screen = (event as InputEventMouse).position
 	# 拖曳期間在 _input 處理，滑鼠移到 UI 上放開也能接到
 	if drag_unit == null:
 		return
@@ -269,34 +284,82 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		_handle_touch(event)
+		return
 	if event is InputEventMouseMotion:
 		_handle_hover()
 		if is_dragging:
-			var delta: Vector2 = (drag_start_mouse - get_viewport().get_mouse_position()) / camera.zoom
+			var delta: Vector2 = (drag_start_mouse - pointer_screen) / camera.zoom
 			camera.position = drag_start_cam + delta
 	elif event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
-		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed and not is_animating:
-			if phase == Phase.DEPLOY:
-				_handle_deploy_press()
-			elif phase == Phase.PLAYER_TURN:
-				_handle_click()
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				if phase == Phase.DEPLOY and not is_animating:
+					_handle_deploy_press()
+				elif phase == Phase.PLAYER_TURN:
+					click_pending = true
+					click_press_pos = mb.position
+			else:
+				if click_pending and phase == Phase.PLAYER_TURN and not is_animating \
+						and mb.position.distance_to(click_press_pos) < CLICK_SLOP:
+					_handle_click()
+				click_pending = false
 		elif mb.button_index == MOUSE_BUTTON_MIDDLE:
 			is_dragging = mb.pressed
 			if mb.pressed:
-				drag_start_mouse = get_viewport().get_mouse_position()
+				drag_start_mouse = pointer_screen
 				drag_start_cam = camera.position
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
 			_zoom(1.0 - ZOOM_STEP)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_zoom(1.0 + ZOOM_STEP)
 
+## 兩指縮放：以兩指中點為焦點縮放，同時跟著中點移動平移地圖
+func _handle_touch(event: InputEvent) -> void:
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			touches[st.index] = st.position
+		else:
+			touches.erase(st.index)
+		if touches.size() >= 2:
+			# 開始雙指操作就取消這次點擊
+			click_pending = false
+		return
+
+	var sd := event as InputEventScreenDrag
+	if not touches.has(sd.index):
+		return
+	if touches.size() < 2 or drag_unit != null:
+		touches[sd.index] = sd.position
+		return
+	var ids := touches.keys()
+	var a: Vector2 = touches[ids[0]]
+	var b: Vector2 = touches[ids[1]]
+	var old_mid := (a + b) / 2.0
+	var old_dist := a.distance_to(b)
+	touches[sd.index] = sd.position
+	a = touches[ids[0]]
+	b = touches[ids[1]]
+	var new_mid := (a + b) / 2.0
+	var new_dist := a.distance_to(b)
+	if old_dist < 1.0:
+		return
+	var view_center := get_viewport_rect().size / 2.0
+	# 舊中點下的世界座標，縮放後要落在新中點下
+	var anchor := camera.position + (old_mid - view_center) / camera.zoom.x
+	var new_zoom := clampf(camera.zoom.x * new_dist / old_dist, ZOOM_MIN, ZOOM_MAX)
+	camera.zoom = Vector2(new_zoom, new_zoom)
+	camera.position = anchor - (new_mid - view_center) / new_zoom
+
 func _zoom(factor: float) -> void:
 	var new_zoom: Vector2 = camera.zoom / factor
 	camera.zoom = new_zoom.clamp(Vector2(ZOOM_MIN, ZOOM_MIN), Vector2(ZOOM_MAX, ZOOM_MAX))
 
 func _handle_hover() -> void:
-	var world_pos := get_global_mouse_position()
+	var world_pos := _pointer_world()
 	var coord := hex_map.pixel_to_axial(world_pos)
 	hex_map.hovered_coord = coord if hex_map.has_tile(coord) else HexMap.NO_COORD
 	terrain_label.text = hex_map.describe(coord) if hex_map.has_tile(coord) else ""
@@ -320,13 +383,13 @@ func _handle_hover() -> void:
 		hex_map.queue_redraw()
 
 func _handle_deploy_press() -> void:
-	var coord := hex_map.pixel_to_axial(get_global_mouse_position())
+	var coord := hex_map.pixel_to_axial(_pointer_world())
 	var unit := get_unit_at(coord)
 	if unit != null and not unit.is_enemy:
 		_begin_drag(unit, unit.axial_coord)
 
 func _handle_click() -> void:
-	var world_pos := get_global_mouse_position()
+	var world_pos := _pointer_world()
 	var coord := hex_map.pixel_to_axial(world_pos)
 	var clicked_unit := get_unit_at(coord) if hex_map.has_tile(coord) else null
 
