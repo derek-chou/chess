@@ -65,17 +65,21 @@ text = "Start Battle"
 
 [node name="VersionLabel" type="Label" parent="UI"]
 modulate = Color(1, 1, 1, 0.6)
-anchors_preset = 2
+anchors_preset = 3
+anchor_left = 1.0
 anchor_top = 1.0
+anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 12.0
+offset_left = -212.0
 offset_top = -32.0
-offset_right = 212.0
+offset_right = -12.0
 offset_bottom = -8.0
+grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 2
 theme_override_font_sizes/font_size = 14
 text = "v0.0.0"
+horizontal_alignment = 2
 vertical_alignment = 2
 
 [node name="GameOver" type="Control" parent="UI"]

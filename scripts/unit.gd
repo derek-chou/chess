@@ -7,7 +7,6 @@ extends Node2D
 @export var attack: int = 3
 ## 爆擊機率（0~1）
 @export_range(0.0, 1.0) var crit_chance: float = 0.0
-@export var team_color: Color = Color(0.2, 0.45, 0.85)
 @export var radius: float = 26.0
 @export var is_enemy: bool = false
 @export var icon: Texture2D
@@ -40,11 +39,9 @@ func is_dead() -> bool:
 	return hp <= 0
 
 func _draw() -> void:
-	# 已結束行動的單位以暗色顯示
-	draw_circle(Vector2.ZERO, radius, team_color.darkened(0.5) if has_acted else team_color)
-	draw_arc(Vector2.ZERO, radius, 0, TAU, 32, Color.BLACK, 2.0, true)
 	if icon:
-		var icon_size := Vector2.ONE * radius * 1.7
+		var icon_size := Vector2.ONE * radius * 2.0
+		# 已結束行動的單位以暗色顯示
 		var tint := Color(0.5, 0.5, 0.5) if has_acted else Color.WHITE
 		draw_texture_rect(icon, Rect2(-icon_size / 2.0, icon_size), false, tint)
 	_draw_hp_bar()

@@ -9,7 +9,6 @@ const SLOT_SIZE := Vector2(76, 76)
 
 var roster_index: int = -1
 var unit_name: String = ""
-var team_color: Color = Color.WHITE
 var icon: Texture2D
 var available: bool = true:
 	set(value):
@@ -34,10 +33,8 @@ func _draw() -> void:
 	draw_rect(rect, Color(1, 1, 1, 0.3), false, 1.0)
 	var center := size / 2.0 - Vector2(0, 6)
 	if available:
-		draw_circle(center, 24.0, team_color)
-		draw_arc(center, 24.0, 0, TAU, 32, Color.BLACK, 2.0, true)
 		if icon:
-			draw_texture_rect(icon, Rect2(center - Vector2(20, 20), Vector2(40, 40)), false)
+			draw_texture_rect(icon, Rect2(center - Vector2(24, 24), Vector2(48, 48)), false)
 	else:
 		draw_arc(center, 24.0, 0, TAU, 32, Color(1, 1, 1, 0.25), 2.0, true)
 	var font := get_theme_default_font()

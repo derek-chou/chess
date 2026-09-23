@@ -47,9 +47,9 @@ const ENEMY_STEP_DELAY := 0.35
 ## 佈署區為地圖最下方幾列
 const DEPLOY_ROWS := 3
 const ENEMY_COUNT := 3
-const ENEMY_STATS := {"name": "Enemy", "icon": preload("res://icons/monster.svg"), "color": Color(0.85, 0.25, 0.25), "move_range": 3, "max_hp": 12, "attack": 4, "crit_chance": 0.1}
+const ENEMY_STATS := {"name": "Enemy", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "crit_chance": 0.1}
 const PLAYER_ROSTER := [
-	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "color": Color(0.2, 0.45, 0.85), "move_range": 3, "max_hp": 30, "attack": 6, "crit_chance": 0.2},
+	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "crit_chance": 0.2},
 ]
 ## 佈署階段將鏡頭縮小，讓整張地圖與佈署欄同時可見
 const DEPLOY_ZOOM := 0.6
@@ -79,7 +79,6 @@ func _spawn_enemies() -> void:
 func _create_unit(stats: Dictionary) -> Unit:
 	var unit := UnitScene.instantiate() as Unit
 	unit.unit_name = stats["name"]
-	unit.team_color = stats["color"]
 	unit.icon = stats["icon"]
 	unit.move_range = stats["move_range"]
 	unit.max_hp = stats["max_hp"]
@@ -92,7 +91,6 @@ func _setup_bench() -> void:
 		var slot := BenchSlot.new()
 		slot.roster_index = i
 		slot.unit_name = PLAYER_ROSTER[i]["name"]
-		slot.team_color = PLAYER_ROSTER[i]["color"]
 		slot.icon = PLAYER_ROSTER[i]["icon"]
 		slot.drag_requested.connect(_on_slot_drag_requested)
 		bench_slots.add_child(slot)
