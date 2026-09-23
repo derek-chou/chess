@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64">
+  <!-- 羽飾 -->
+  <path d="M32 12 C30 6 34 2 40 3 C46 4 50 9 49 15 C45 11 40 10 36 13 Z" fill="#d6453a" stroke="#2b2f36" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 頭盔 -->
+  <path d="M15 32 C15 18 23 11 32 11 C41 11 49 18 49 32 L49 50 C49 55 45 58 40 58 L24 58 C19 58 15 55 15 50 Z" fill="#cfd6de" stroke="#2b2f36" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- 右側陰影 -->
+  <path d="M32 11 C41 11 49 18 49 32 L49 50 C49 55 45 58 40 58 L32 58 Z" fill="#9aa4b0" opacity="0.55"/>
+  <!-- 中脊 -->
+  <path d="M32 12 L32 29" stroke="#f4f7fa" stroke-width="3" stroke-linecap="round"/>
+  <!-- T 形面甲開口 -->
+  <path d="M19 31 L45 31 L45 37 L35 37 L35 50 L29 50 L29 37 L19 37 Z" fill="#1f232a" stroke="#1f232a" stroke-width="1" stroke-linejoin="round"/>
+  <!-- 鉚釘 -->
+  <circle cx="20" cy="45" r="1.8" fill="#6b7480"/>
+  <circle cx="44" cy="45" r="1.8" fill="#4f5763"/>
+  <circle cx="20" cy="52" r="1.8" fill="#6b7480"/>
+  <circle cx="44" cy="52" r="1.8" fill="#4f5763"/>
+</svg>
