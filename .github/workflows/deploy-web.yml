@@ -51,6 +51,15 @@ jobs:
           ~/godot/godot --headless --export-release "Web" build/web/index.html
           test -f build/web/index.pck
 
+      # GitHub Pages 會讓瀏覽器快取 10 分鐘；每次部署改用含 commit 的檔名，強制載入新版遊戲內容
+      - name: Cache-bust main pack
+        run: |
+          cd build/web
+          pck="index-${GITHUB_SHA::7}.pck"
+          mv index.pck "$pck"
+          sed -i "s/\"index.pck\":/\"$pck\":/; s/GODOT_CONFIG = {/GODOT_CONFIG = {\"mainPack\":\"$pck\",/" index.html
+          grep -q "\"mainPack\":\"$pck\"" index.html
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
