@@ -10,6 +10,11 @@ const UnitScene := preload("res://scenes/Unit.tscn")
 @onready var bench_slots: HBoxContainer = $UI/Bench/Row/Slots
 @onready var start_button: Button = $UI/Bench/Row/StartButton
 @onready var end_turn_button: Button = $UI/EndTurnButton
+@onready var version_label: Label = $UI/VersionLabel
+@onready var game_over_panel: Control = $UI/GameOver
+@onready var game_over_title: Label = $UI/GameOver/Center/Box/Title
+@onready var game_over_subtitle: Label = $UI/GameOver/Center/Box/Subtitle
+@onready var restart_button: Button = $UI/GameOver/Center/Box/RestartButton
 
 enum Phase { DEPLOY, PLAYER_TURN, ENEMY_TURN, GAME_OVER }
 var phase: Phase = Phase.DEPLOY
@@ -50,6 +55,8 @@ const PLAYER_ROSTER := [
 const DEPLOY_ZOOM := 0.6
 
 func _ready() -> void:
+	version_label.text = "v%s" % ProjectSettings.get_setting("application/config/version", "0.0.0")
+	restart_button.pressed.connect(func() -> void: get_tree().reload_current_scene())
 	hex_map.generate_map()
 	hex_map.setup_deploy_zone(DEPLOY_ROWS)
 	_spawn_enemies()
@@ -540,7 +547,37 @@ func _check_game_over() -> bool:
 	reachable_data = {}
 	hex_map.clear_highlight()
 	_update_info(VICTORY_INFO if won else DEFEAT_INFO)
+	_show_game_over(won)
 	return true
+
+## 結算畫面：背景淡入、標題彈跳放大，最後顯示重新開始按鈕
+func _show_game_over(won: bool) -> void:
+	game_over_title.text = "VICTORY" if won else "DEFEAT"
+	game_over_title.add_theme_color_override("font_color",
+		Color(1, 0.85, 0.3) if won else Color(0.9, 0.25, 0.2))
+	game_over_subtitle.text = "All enemies defeated in %d %s." % [turn_number, "turn" if turn_number == 1 else "turns"] if won \
+		else "Your units have fallen."
+	# 等最後一擊的動畫播完再顯示
+	await get_tree().create_timer(0.5).timeout
+	game_over_panel.modulate.a = 0.0
+	game_over_title.scale = Vector2.ZERO
+	game_over_subtitle.modulate.a = 0.0
+	restart_button.modulate.a = 0.0
+	restart_button.disabled = true
+	game_over_panel.visible = true
+	# 等版面配置完成，標題才能以自身中心縮放
+	await get_tree().process_frame
+	game_over_title.pivot_offset = game_over_title.size / 2.0
+
+	var tween := create_tween()
+	tween.tween_property(game_over_panel, "modulate:a", 1.0, 0.3)
+	tween.tween_property(game_over_title, "scale", Vector2.ONE, 0.6) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(game_over_subtitle, "modulate:a", 1.0, 0.25)
+	tween.parallel().tween_property(restart_button, "modulate:a", 1.0, 0.25)
+	await tween.finished
+	restart_button.disabled = false
+	restart_button.grab_focus()
 
 func _animate_move(unit: Unit, move_path: Array[Vector2i]) -> void:
 	if move_path.is_empty():
