@@ -16,6 +16,9 @@ const UnitScene := preload("res://scenes/Unit.tscn")
 @onready var game_over_subtitle: Label = $UI/GameOver/Center/Box/Subtitle
 @onready var restart_button: Button = $UI/GameOver/Center/Box/RestartButton
 @onready var stage_label: Label = $UI/StageLabel
+@onready var upgrades_box: Control = $UI/GameOver/Center/Box/Upgrades
+@onready var upgrade_points_label: Label = $UI/GameOver/Center/Box/Upgrades/PointsLabel
+@onready var upgrade_grid: GridContainer = $UI/GameOver/Center/Box/Upgrades/Grid
 
 enum Phase { DEPLOY, PLAYER_TURN, ENEMY_TURN, GAME_OVER }
 var phase: Phase = Phase.DEPLOY
@@ -23,6 +26,13 @@ var turn_number: int = 0
 
 ## 目前關卡索引；static 讓它在重新載入場景後保留
 static var current_stage: int = 0
+## 過關後分配的累積加成點數（stat key -> 點數）；全破重玩時清空
+static var player_bonus: Dictionary = {}
+
+## 過關畫面上尚未確認的點數分配
+var pending_upgrades: Dictionary = {}
+var upgrade_points_left: int = 0
+var upgrade_value_labels: Dictionary = {} # stat key -> Label
 
 ## 拖曳佈署中的單位與其原位置（NO_COORD 代表從佈署欄拖出）
 var drag_unit: Unit = null
@@ -51,16 +61,22 @@ const ENEMY_STEP_DELAY := 0.35
 ## 佈署區為地圖最下方幾列
 const DEPLOY_ROWS := 3
 const ENEMY_TYPES := {
-	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "crit_chance": 0.1},
-	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "crit_chance": 0.15, "radius": 33.0},
+	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "defense": 0, "crit_chance": 0.1},
+	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "defense": 1, "crit_chance": 0.15, "radius": 33.0},
 }
-## 每關出場的敵人種類
+## 每關出場的敵人種類，以及過關後可分配的升級點數
 const STAGES := [
-	{"enemies": ["minion", "minion", "minion"]},
-	{"enemies": ["minion", "minion", "minion", "boss"]},
+	{"enemies": ["minion", "minion", "minion"], "reward_points": 3},
+	{"enemies": ["minion", "minion", "minion", "boss"], "reward_points": 3},
+]
+## 可升級的數值：每點提升量與顯示格式
+const UPGRADES := [
+	{"key": "attack", "label": "ATK", "per_point": 1},
+	{"key": "defense", "label": "DEF", "per_point": 1},
+	{"key": "crit_chance", "label": "CRIT", "per_point": 0.05},
 ]
 const PLAYER_ROSTER := [
-	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "crit_chance": 0.2},
+	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "defense": 0, "crit_chance": 0.2},
 ]
 ## 佈署階段將鏡頭縮小，讓整張地圖與佈署欄同時可見
 const DEPLOY_ZOOM := 0.6
@@ -96,6 +112,7 @@ func _create_unit(stats: Dictionary) -> Unit:
 	unit.move_range = stats["move_range"]
 	unit.max_hp = stats["max_hp"]
 	unit.attack = stats["attack"]
+	unit.defense = stats["defense"]
 	unit.crit_chance = stats["crit_chance"]
 	unit.radius = stats.get("radius", unit.radius)
 	return unit
@@ -159,7 +176,7 @@ func _is_active(unit: Unit) -> bool:
 func _on_slot_drag_requested(slot: BenchSlot) -> void:
 	if phase != Phase.DEPLOY or drag_unit != null:
 		return
-	var unit := _create_unit(PLAYER_ROSTER[slot.roster_index])
+	var unit := _create_player_unit(slot.roster_index)
 	unit.roster_index = slot.roster_index
 	units_container.add_child(unit)
 	_begin_drag(unit, HexMap.NO_COORD)
@@ -323,8 +340,8 @@ func _select_unit(unit: Unit) -> void:
 	hex_map.set_highlight(reachable_data["cost"], [])
 	var targets := _get_attack_targets(unit)
 	hex_map.set_attack_targets(targets)
-	var info := "%s selected (HP %d/%d, ATK %d, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
-		unit.unit_name, unit.hp, unit.max_hp, unit.attack, roundi(unit.crit_chance * 100), unit.move_range]
+	var info := "%s selected (HP %d/%d, ATK %d, DEF %d, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
+		unit.unit_name, unit.hp, unit.max_hp, unit.attack, unit.defense, roundi(unit.crit_chance * 100), unit.move_range]
 	if not targets.is_empty():
 		info += ", or a red enemy to attack"
 	_update_info(info + ".")
@@ -495,7 +512,8 @@ func _strike(attacker: Unit, target: Unit) -> void:
 	var home := attacker.position
 	var lunge := home.lerp(target.position, 0.4)
 	var is_crit := randf() < attacker.crit_chance
-	var damage := attacker.attack * (CRIT_MULTIPLIER if is_crit else 1)
+	# 攻擊力扣掉防禦力（至少 1 點），爆擊再乘倍率
+	var damage := maxi(1, attacker.attack - target.defense) * (CRIT_MULTIPLIER if is_crit else 1)
 	attacker.z_index = 5
 	var tween := create_tween()
 	tween.tween_property(attacker, "position", lunge, 0.1).set_trans(Tween.TRANS_SINE)
@@ -568,8 +586,9 @@ func _show_game_over(won: bool) -> void:
 	var is_last_stage := current_stage == STAGES.size() - 1
 	if won and not is_last_stage:
 		game_over_title.text = "STAGE CLEAR"
-		game_over_subtitle.text = "Stage %d cleared in %s." % [current_stage + 1, turns]
+		game_over_subtitle.text = "Stage %d cleared in %s. Spend your points to power up." % [current_stage + 1, turns]
 		restart_button.text = "Next Stage"
+		_setup_upgrades(STAGES[current_stage]["reward_points"])
 	elif won:
 		game_over_title.text = "VICTORY"
 		game_over_subtitle.text = "All stages cleared! Final stage took %s." % turns
@@ -585,6 +604,7 @@ func _show_game_over(won: bool) -> void:
 	game_over_panel.modulate.a = 0.0
 	game_over_title.scale = Vector2.ZERO
 	game_over_subtitle.modulate.a = 0.0
+	upgrades_box.modulate.a = 0.0
 	restart_button.modulate.a = 0.0
 	restart_button.disabled = true
 	game_over_panel.visible = true
@@ -597,16 +617,106 @@ func _show_game_over(won: bool) -> void:
 	tween.tween_property(game_over_title, "scale", Vector2.ONE, 0.6) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.tween_property(game_over_subtitle, "modulate:a", 1.0, 0.25)
+	tween.parallel().tween_property(upgrades_box, "modulate:a", 1.0, 0.25)
 	tween.parallel().tween_property(restart_button, "modulate:a", 1.0, 0.25)
 	await tween.finished
-	restart_button.disabled = false
-	restart_button.grab_focus()
+	_refresh_upgrades()
+	if not restart_button.disabled:
+		restart_button.grab_focus()
 
 ## 過關進下一關；全破後從第一關重來；失敗則重打本關
 func _on_restart_pressed() -> void:
 	if _get_team(true).is_empty():
+		for key in pending_upgrades:
+			player_bonus[key] = player_bonus.get(key, 0) + pending_upgrades[key]
 		current_stage = (current_stage + 1) % STAGES.size()
+		if current_stage == 0:
+			player_bonus.clear()
 	get_tree().reload_current_scene()
+
+## 套用過關累積的加成，建立玩家單位
+func _create_player_unit(index: int) -> Unit:
+	var stats: Dictionary = PLAYER_ROSTER[index].duplicate()
+	for upgrade in UPGRADES:
+		var key: String = upgrade["key"]
+		stats[key] += player_bonus.get(key, 0) * upgrade["per_point"]
+	stats["crit_chance"] = minf(stats["crit_chance"], 1.0)
+	return _create_unit(stats)
+
+# ---- 過關升級 ----
+
+func _setup_upgrades(points: int) -> void:
+	upgrade_points_left = points
+	pending_upgrades.clear()
+	upgrade_value_labels.clear()
+	for child in upgrade_grid.get_children():
+		child.queue_free()
+	for upgrade in UPGRADES:
+		var key: String = upgrade["key"]
+		pending_upgrades[key] = 0
+		var name_label := Label.new()
+		name_label.text = upgrade["label"]
+		name_label.custom_minimum_size.x = 60
+		name_label.add_theme_font_size_override("font_size", 20)
+		var value_label := Label.new()
+		value_label.custom_minimum_size.x = 110
+		value_label.add_theme_font_size_override("font_size", 20)
+		upgrade_value_labels[key] = value_label
+		var minus := Button.new()
+		minus.text = "-"
+		minus.custom_minimum_size = Vector2(40, 36)
+		minus.add_theme_font_size_override("font_size", 22)
+		minus.pressed.connect(_change_upgrade.bind(key, -1))
+		var plus := Button.new()
+		plus.text = "+"
+		plus.custom_minimum_size = Vector2(40, 36)
+		plus.add_theme_font_size_override("font_size", 22)
+		plus.pressed.connect(_change_upgrade.bind(key, 1))
+		for node in [name_label, value_label, minus, plus]:
+			upgrade_grid.add_child(node)
+	upgrades_box.visible = true
+
+func _change_upgrade(key: String, delta: int) -> void:
+	if delta > 0 and upgrade_points_left <= 0:
+		return
+	if delta < 0 and pending_upgrades[key] <= 0:
+		return
+	pending_upgrades[key] += delta
+	upgrade_points_left -= delta
+	_refresh_upgrades()
+
+## 更新點數與數值顯示，並依剩餘點數啟用按鈕
+func _refresh_upgrades() -> void:
+	if not upgrades_box.visible:
+		restart_button.disabled = false
+		return
+	upgrade_points_left = maxi(upgrade_points_left, 0)
+	upgrade_points_label.text = "Points left: %d" % upgrade_points_left
+	var base: Dictionary = PLAYER_ROSTER[0]
+	var i := 0
+	for upgrade in UPGRADES:
+		var key: String = upgrade["key"]
+		var current: float = base[key] + player_bonus.get(key, 0) * upgrade["per_point"]
+		var added: int = pending_upgrades[key]
+		var after: float = current + added * upgrade["per_point"]
+		var label: Label = upgrade_value_labels[key]
+		var gain: float = added * upgrade["per_point"]
+		if key == "crit_chance":
+			label.text = "%d%%" % roundi(minf(after, 1.0) * 100)
+			if added > 0:
+				label.text += "  (+%d%%)" % roundi(gain * 100)
+		else:
+			label.text = "%d" % after
+			if added > 0:
+				label.text += "  (+%d)" % gain
+		label.add_theme_color_override("font_color", Color(0.5, 1, 0.5) if added > 0 else Color.WHITE)
+		# 每列的 - / + 按鈕在名稱與數值之後
+		var minus: Button = upgrade_grid.get_child(i * 4 + 2)
+		var plus: Button = upgrade_grid.get_child(i * 4 + 3)
+		minus.disabled = added <= 0
+		plus.disabled = upgrade_points_left <= 0
+		i += 1
+	restart_button.disabled = upgrade_points_left > 0
 
 func _animate_move(unit: Unit, move_path: Array[Vector2i]) -> void:
 	if move_path.is_empty():
