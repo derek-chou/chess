@@ -789,21 +789,21 @@ func _setup_upgrades(points: int) -> void:
 		pending_upgrades[key] = 0
 		var name_label := Label.new()
 		name_label.text = upgrade["label"]
-		name_label.custom_minimum_size.x = 60
-		name_label.add_theme_font_size_override("font_size", 20)
+		name_label.custom_minimum_size.x = 90
+		name_label.add_theme_font_size_override("font_size", 30)
 		var value_label := Label.new()
-		value_label.custom_minimum_size.x = 190
-		value_label.add_theme_font_size_override("font_size", 20)
+		value_label.custom_minimum_size.x = 285
+		value_label.add_theme_font_size_override("font_size", 30)
 		upgrade_value_labels[key] = value_label
 		var minus := Button.new()
 		minus.text = "-"
-		minus.custom_minimum_size = Vector2(40, 36)
-		minus.add_theme_font_size_override("font_size", 22)
+		minus.custom_minimum_size = Vector2(60, 54)
+		minus.add_theme_font_size_override("font_size", 33)
 		minus.pressed.connect(_change_upgrade.bind(key, -1))
 		var plus := Button.new()
 		plus.text = "+"
-		plus.custom_minimum_size = Vector2(40, 36)
-		plus.add_theme_font_size_override("font_size", 22)
+		plus.custom_minimum_size = Vector2(60, 54)
+		plus.add_theme_font_size_override("font_size", 33)
 		plus.pressed.connect(_change_upgrade.bind(key, 1))
 		for node in [name_label, value_label, minus, plus]:
 			upgrade_grid.add_child(node)
