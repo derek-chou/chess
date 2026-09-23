@@ -58,6 +58,9 @@ const VICTORY_INFO := "Victory! All enemies defeated."
 const DEFEAT_INFO := "Defeat! All your units have fallen."
 ## 爆擊傷害倍率
 const CRIT_MULTIPLIER := 2
+## 每點防禦減少的傷害比例與上限
+const DEF_REDUCTION_PER_POINT := 0.08
+const DEF_REDUCTION_CAP := 0.5
 ## 敵方回合中每個動作之間的停頓（秒）
 const ENEMY_STEP_DELAY := 0.35
 
@@ -65,8 +68,8 @@ const ENEMY_STEP_DELAY := 0.35
 const DEPLOY_ROWS := 3
 const ENEMY_TYPES := {
 	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 5, "defense": 0, "crit_chance": 0.1, "hit_chance": 0.85},
-	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 6, "defense": 1, "crit_chance": 0.1, "hit_chance": 0.8, "radius": 29.0},
-	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 6, "defense": 1, "crit_chance": 0.15, "hit_chance": 0.9, "radius": 33.0},
+	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 6, "defense": 2, "crit_chance": 0.1, "hit_chance": 0.8, "radius": 29.0},
+	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 6, "defense": 3, "crit_chance": 0.15, "hit_chance": 0.9, "radius": 33.0},
 }
 ## 每關的地圖半徑、出場敵人，以及過關後可分配的升級點數
 const STAGES := [
@@ -82,7 +85,7 @@ const UPGRADES := [
 	{"key": "hit_chance", "label": "HIT", "per_point": 0.05},
 ]
 const PLAYER_ROSTER := [
-	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "defense": 0, "crit_chance": 0.2, "hit_chance": 0.8},
+	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 45, "attack": 6, "defense": 0, "crit_chance": 0.2, "hit_chance": 0.8},
 ]
 ## 佈署階段鏡頭縮放時，畫面上方保留給說明文字的高度（像素）
 const DEPLOY_TOP_MARGIN := 60.0
@@ -362,8 +365,9 @@ func _select_unit(unit: Unit) -> void:
 	hex_map.set_highlight(reachable_data["cost"], [])
 	var targets := _get_attack_targets(unit)
 	hex_map.set_attack_targets(targets)
-	var info := "%s selected (HP %d/%d, ATK %d, DEF %d, HIT %d%%, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
-		unit.unit_name, unit.hp, unit.max_hp, unit.attack, unit.defense, roundi(unit.hit_chance * 100),
+	var info := "%s selected (HP %d/%d, ATK %d, DEF %d (-%d%% dmg), HIT %d%%, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
+		unit.unit_name, unit.hp, unit.max_hp, unit.attack, unit.defense,
+		roundi(_damage_reduction(unit.defense) * 100), roundi(unit.hit_chance * 100),
 		roundi(unit.crit_chance * 100), unit.move_range]
 	if not targets.is_empty():
 		info += ", or a red enemy to attack"
@@ -564,7 +568,11 @@ func _hit_chance(attacker: Unit, target: Unit) -> float:
 
 ## 攻擊力扣掉防禦力，至少 1 點
 func _base_damage(attacker: Unit, target: Unit) -> int:
-	return maxi(1, attacker.attack - target.defense)
+	return maxi(1, roundi(attacker.attack * (1.0 - _damage_reduction(target.defense))))
+
+## 防禦力轉成減傷比例：每點 8%，最多 50%，讓堆防禦的效益遞減
+static func _damage_reduction(defense: int) -> float:
+	return minf(defense * DEF_REDUCTION_PER_POINT, DEF_REDUCTION_CAP)
 
 ## 攻擊預測，例如 "Attack Minion: HIT 65% · DMG 6 · CRIT 20%"
 func _attack_forecast(attacker: Unit, target: Unit) -> String:
@@ -721,7 +729,7 @@ func _setup_upgrades(points: int) -> void:
 		name_label.custom_minimum_size.x = 60
 		name_label.add_theme_font_size_override("font_size", 20)
 		var value_label := Label.new()
-		value_label.custom_minimum_size.x = 110
+		value_label.custom_minimum_size.x = 190
 		value_label.add_theme_font_size_override("font_size", 20)
 		upgrade_value_labels[key] = value_label
 		var minus := Button.new()
@@ -771,6 +779,8 @@ func _refresh_upgrades() -> void:
 			label.text = "%d" % after
 			if added > 0:
 				label.text += "  (+%d)" % gain
+			if key == "defense":
+				label.text += "  -%d%% dmg" % roundi(_damage_reduction(int(after)) * 100)
 		label.add_theme_color_override("font_color", Color(0.5, 1, 0.5) if added > 0 else Color.WHITE)
 		# 每列的 - / + 按鈕在名稱與數值之後
 		var minus: Button = upgrade_grid.get_child(i * 4 + 2)
