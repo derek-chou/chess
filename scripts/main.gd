@@ -15,10 +15,14 @@ const UnitScene := preload("res://scenes/Unit.tscn")
 @onready var game_over_title: Label = $UI/GameOver/Center/Box/Title
 @onready var game_over_subtitle: Label = $UI/GameOver/Center/Box/Subtitle
 @onready var restart_button: Button = $UI/GameOver/Center/Box/RestartButton
+@onready var stage_label: Label = $UI/StageLabel
 
 enum Phase { DEPLOY, PLAYER_TURN, ENEMY_TURN, GAME_OVER }
 var phase: Phase = Phase.DEPLOY
 var turn_number: int = 0
+
+## 目前關卡索引；static 讓它在重新載入場景後保留
+static var current_stage: int = 0
 
 ## 拖曳佈署中的單位與其原位置（NO_COORD 代表從佈署欄拖出）
 var drag_unit: Unit = null
@@ -46,8 +50,15 @@ const ENEMY_STEP_DELAY := 0.35
 
 ## 佈署區為地圖最下方幾列
 const DEPLOY_ROWS := 3
-const ENEMY_COUNT := 3
-const ENEMY_STATS := {"name": "Enemy", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "crit_chance": 0.1}
+const ENEMY_TYPES := {
+	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "crit_chance": 0.1},
+	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "crit_chance": 0.15, "radius": 33.0},
+}
+## 每關出場的敵人種類
+const STAGES := [
+	{"enemies": ["minion", "minion", "minion"]},
+	{"enemies": ["minion", "minion", "minion", "boss"]},
+]
 const PLAYER_ROSTER := [
 	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "crit_chance": 0.2},
 ]
@@ -56,7 +67,8 @@ const DEPLOY_ZOOM := 0.6
 
 func _ready() -> void:
 	version_label.text = "v%s" % ProjectSettings.get_setting("application/config/version", "0.0.0")
-	restart_button.pressed.connect(func() -> void: get_tree().reload_current_scene())
+	restart_button.pressed.connect(_on_restart_pressed)
+	stage_label.text = "Stage %d / %d" % [current_stage + 1, STAGES.size()]
 	hex_map.generate_map()
 	hex_map.setup_deploy_zone(DEPLOY_ROWS)
 	_spawn_enemies()
@@ -70,8 +82,9 @@ func _spawn_enemies() -> void:
 		if coord.y < 0 and hex_map.is_walkable(coord) and not hex_map.is_deploy_tile(coord):
 			candidates.append(coord)
 	candidates.shuffle()
-	for i in range(min(ENEMY_COUNT, candidates.size())):
-		var enemy := _create_unit(ENEMY_STATS)
+	var enemy_types: Array = STAGES[current_stage]["enemies"]
+	for i in range(min(enemy_types.size(), candidates.size())):
+		var enemy := _create_unit(ENEMY_TYPES[enemy_types[i]])
 		enemy.is_enemy = true
 		units_container.add_child(enemy)
 		enemy.place(candidates[i], hex_map)
@@ -84,6 +97,7 @@ func _create_unit(stats: Dictionary) -> Unit:
 	unit.max_hp = stats["max_hp"]
 	unit.attack = stats["attack"]
 	unit.crit_chance = stats["crit_chance"]
+	unit.radius = stats.get("radius", unit.radius)
 	return unit
 
 func _setup_bench() -> void:
@@ -550,11 +564,22 @@ func _check_game_over() -> bool:
 
 ## 結算畫面：背景淡入、標題彈跳放大，最後顯示重新開始按鈕
 func _show_game_over(won: bool) -> void:
-	game_over_title.text = "VICTORY" if won else "DEFEAT"
+	var turns := "%d %s" % [turn_number, "turn" if turn_number == 1 else "turns"]
+	var is_last_stage := current_stage == STAGES.size() - 1
+	if won and not is_last_stage:
+		game_over_title.text = "STAGE CLEAR"
+		game_over_subtitle.text = "Stage %d cleared in %s." % [current_stage + 1, turns]
+		restart_button.text = "Next Stage"
+	elif won:
+		game_over_title.text = "VICTORY"
+		game_over_subtitle.text = "All stages cleared! Final stage took %s." % turns
+		restart_button.text = "Play Again"
+	else:
+		game_over_title.text = "DEFEAT"
+		game_over_subtitle.text = "Your units have fallen on stage %d." % (current_stage + 1)
+		restart_button.text = "Retry Stage"
 	game_over_title.add_theme_color_override("font_color",
 		Color(1, 0.85, 0.3) if won else Color(0.9, 0.25, 0.2))
-	game_over_subtitle.text = "All enemies defeated in %d %s." % [turn_number, "turn" if turn_number == 1 else "turns"] if won \
-		else "Your units have fallen."
 	# 等最後一擊的動畫播完再顯示
 	await get_tree().create_timer(0.5).timeout
 	game_over_panel.modulate.a = 0.0
@@ -576,6 +601,12 @@ func _show_game_over(won: bool) -> void:
 	await tween.finished
 	restart_button.disabled = false
 	restart_button.grab_focus()
+
+## 過關進下一關；全破後從第一關重來；失敗則重打本關
+func _on_restart_pressed() -> void:
+	if _get_team(true).is_empty():
+		current_stage = (current_stage + 1) % STAGES.size()
+	get_tree().reload_current_scene()
 
 func _animate_move(unit: Unit, move_path: Array[Vector2i]) -> void:
 	if move_path.is_empty():

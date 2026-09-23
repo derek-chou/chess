@@ -11,7 +11,8 @@ extends Node2D
 @export var is_enemy: bool = false
 @export var icon: Texture2D
 
-const HP_BAR_SIZE := Vector2(48, 7)
+const HP_BAR_HEIGHT := 7.0
+const HP_BAR_MIN_WIDTH := 48.0
 const HP_BAR_GAP := 6.0
 
 var axial_coord: Vector2i = Vector2i.ZERO
@@ -47,10 +48,12 @@ func _draw() -> void:
 	_draw_hp_bar()
 
 func _draw_hp_bar() -> void:
-	var origin := Vector2(-HP_BAR_SIZE.x / 2.0, -radius - HP_BAR_GAP - HP_BAR_SIZE.y)
-	var back := Rect2(origin, HP_BAR_SIZE)
+	# 體型較大的單位（如小王）血條也較寬
+	var bar_size := Vector2(maxf(HP_BAR_MIN_WIDTH, radius * 1.9), HP_BAR_HEIGHT)
+	var origin := Vector2(-bar_size.x / 2.0, -radius - HP_BAR_GAP - bar_size.y)
+	var back := Rect2(origin, bar_size)
 	draw_rect(back.grow(1.0), Color.BLACK)
 	draw_rect(back, Color(0.2, 0.2, 0.2))
 	var ratio := float(hp) / float(max_hp) if max_hp > 0 else 0.0
 	var fill_color := Color(0.9, 0.3, 0.25) if is_enemy else Color(0.35, 0.85, 0.35)
-	draw_rect(Rect2(origin, Vector2(HP_BAR_SIZE.x * ratio, HP_BAR_SIZE.y)), fill_color)
+	draw_rect(Rect2(origin, Vector2(bar_size.x * ratio, bar_size.y)), fill_color)
