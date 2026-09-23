@@ -62,12 +62,14 @@ const ENEMY_STEP_DELAY := 0.35
 const DEPLOY_ROWS := 3
 const ENEMY_TYPES := {
 	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "defense": 0, "crit_chance": 0.1},
+	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 5, "defense": 1, "crit_chance": 0.1, "radius": 29.0},
 	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "defense": 1, "crit_chance": 0.15, "radius": 33.0},
 }
-## 每關出場的敵人種類，以及過關後可分配的升級點數
+## 每關的地圖半徑、出場敵人，以及過關後可分配的升級點數
 const STAGES := [
-	{"enemies": ["minion", "minion", "minion"], "reward_points": 3},
-	{"enemies": ["minion", "minion", "minion", "boss"], "reward_points": 3},
+	{"map_radius": 6, "enemies": ["minion", "minion", "minion"], "reward_points": 3},
+	{"map_radius": 6, "enemies": ["minion", "minion", "minion", "boss"], "reward_points": 3},
+	{"map_radius": 7, "enemies": ["minion", "minion", "minion", "minion", "minion", "brute", "brute"], "reward_points": 3},
 ]
 ## 可升級的數值：每點提升量與顯示格式
 const UPGRADES := [
@@ -78,14 +80,14 @@ const UPGRADES := [
 const PLAYER_ROSTER := [
 	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "defense": 0, "crit_chance": 0.2},
 ]
-## 佈署階段將鏡頭縮小，讓整張地圖與佈署欄同時可見
-const DEPLOY_ZOOM := 0.6
+## 佈署階段鏡頭縮放時，畫面上方保留給說明文字的高度（像素）
+const DEPLOY_TOP_MARGIN := 60.0
 
 func _ready() -> void:
 	version_label.text = "v%s" % ProjectSettings.get_setting("application/config/version", "0.0.0")
 	restart_button.pressed.connect(_on_restart_pressed)
 	stage_label.text = "Stage %d / %d" % [current_stage + 1, STAGES.size()]
-	hex_map.generate_map()
+	hex_map.generate_map(STAGES[current_stage]["map_radius"])
 	hex_map.setup_deploy_zone(DEPLOY_ROWS)
 	_spawn_enemies()
 	_setup_bench()
@@ -132,9 +134,16 @@ func _enter_deploy_phase() -> void:
 	phase = Phase.DEPLOY
 	hex_map.show_deploy_zone = true
 	bench.visible = true
-	camera.zoom = Vector2(DEPLOY_ZOOM, DEPLOY_ZOOM)
-	# 讓地圖置中於佈署欄上方的可視區域
-	camera.position = Vector2(0, -bench.offset_top / 2.0 / DEPLOY_ZOOM)
+	# 依地圖大小縮放鏡頭，讓整張地圖落在說明文字與佈署欄之間
+	var view := get_viewport_rect().size
+	var bench_height := -bench.offset_top
+	var map_size := Vector2(
+		HexUtils.SQRT3 * hex_map.hex_size * (2 * hex_map.map_radius + 1),
+		hex_map.hex_size * (3 * hex_map.map_radius + 2))
+	var avail := Vector2(view.x - 32.0, view.y - bench_height - DEPLOY_TOP_MARGIN - 24.0)
+	var zoom := minf(1.0, minf(avail.x / map_size.x, avail.y / map_size.y))
+	camera.zoom = Vector2(zoom, zoom)
+	camera.position = Vector2(0, (bench_height - DEPLOY_TOP_MARGIN) / 2.0 / zoom)
 	_refresh_deploy_ui()
 	_update_info(DEPLOY_INFO)
 
