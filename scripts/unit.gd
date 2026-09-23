@@ -8,6 +8,8 @@ extends Node2D
 @export var defense: int = 0
 ## 爆擊機率（0~1）
 @export_range(0.0, 1.0) var crit_chance: float = 0.0
+## 命中率（0~1），實際命中會再扣掉目標所在地形的閃避
+@export_range(0.0, 1.0) var hit_chance: float = 1.0
 @export var radius: float = 26.0
 @export var is_enemy: bool = false
 @export var icon: Texture2D

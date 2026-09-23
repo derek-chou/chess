@@ -3,11 +3,11 @@ extends Node2D
 
 enum Terrain { GRASS, FOREST, MOUNTAIN, WATER }
 
-const TERRAIN_COLOR := {
-	Terrain.GRASS: Color(0.49, 0.72, 0.38),
-	Terrain.FOREST: Color(0.27, 0.48, 0.25),
-	Terrain.MOUNTAIN: Color(0.55, 0.52, 0.48),
-	Terrain.WATER: Color(0.29, 0.51, 0.73),
+const TERRAIN_NAME := {
+	Terrain.GRASS: "Grass",
+	Terrain.FOREST: "Forest",
+	Terrain.MOUNTAIN: "Mountain",
+	Terrain.WATER: "Water",
 }
 
 ## 移動花費；小於 0 代表無法通行
@@ -17,6 +17,14 @@ const TERRAIN_COST := {
 	Terrain.MOUNTAIN: -1,
 	Terrain.WATER: -1,
 }
+
+## 站在該地形上的單位獲得的閃避率
+const TERRAIN_EVASION := {
+	Terrain.FOREST: 0.15,
+}
+
+## 高亮層的內縮，讓外框不會壓到相鄰格
+const OVERLAY_INSET := 3.0
 
 const NO_COORD := Vector2i(999999, 999999)
 
@@ -40,6 +48,15 @@ var show_deploy_zone: bool = false
 enum DropState { NONE, VALID, INVALID }
 var drop_state: DropState = DropState.NONE
 
+var terrain_layer: TerrainLayer
+
+func _ready() -> void:
+	terrain_layer = TerrainLayer.new()
+	terrain_layer.hex_map = self
+	# 地形畫在本節點（高亮層）之下
+	terrain_layer.show_behind_parent = true
+	add_child(terrain_layer)
+
 func generate_map(radius: int = map_radius) -> void:
 	map_radius = radius
 	tiles.clear()
@@ -60,6 +77,8 @@ func generate_map(radius: int = map_radius) -> void:
 				elif roll < 0.40:
 					terrain = Terrain.FOREST
 			tiles[coord] = terrain
+	if terrain_layer:
+		terrain_layer.queue_redraw()
 	queue_redraw()
 
 func axial_to_pixel(coord: Vector2i) -> Vector2:
@@ -79,6 +98,21 @@ func is_walkable(coord: Vector2i) -> bool:
 
 func movement_cost(coord: Vector2i) -> int:
 	return TERRAIN_COST[tiles[coord]]
+
+func evasion(coord: Vector2i) -> float:
+	return TERRAIN_EVASION.get(get_terrain(coord), 0.0)
+
+## 地形說明，例如 "Forest · Move 2 · Evade +15%"
+func describe(coord: Vector2i) -> String:
+	var terrain := get_terrain(coord)
+	var text: String = TERRAIN_NAME[terrain]
+	if not is_walkable(coord):
+		return text + " · Impassable"
+	text += " · Move %d" % movement_cost(coord)
+	var eva := evasion(coord)
+	if eva > 0.0:
+		text += " · Evade +%d%%" % roundi(eva * 100)
+	return text
 
 ## 以地圖最下方 rows 列可通行格作為佈署區
 func setup_deploy_zone(rows: int) -> void:
@@ -145,39 +179,47 @@ func clear_highlight() -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	# 只畫高亮；地形底圖由 TerrainLayer 負責
 	for coord in tiles.keys():
-		var terrain: Terrain = tiles[coord]
+		var fill := Color(0, 0, 0, 0)
+		var border := Color(0, 0, 0, 0)
+		var border_width := 0.0
+		if show_deploy_zone and deploy_zone.has(coord):
+			fill = Color(0.3, 0.6, 1.0, 0.32)
+			border = Color(0.6, 0.82, 1.0, 0.85)
+			border_width = 2.0
+		if reachable.has(coord):
+			fill = Color(1, 1, 1, 0.22)
+			border = Color(1, 1, 1, 0.5)
+			border_width = 1.5
+		if path.has(coord):
+			fill = Color(1.0, 0.85, 0.3, 0.4)
+			border = Color(1.0, 0.9, 0.45, 0.9)
+			border_width = 2.0
+		if attack_targets.has(coord):
+			fill = Color(1.0, 0.25, 0.2, 0.2)
+			border = Color(1.0, 0.25, 0.2, 1.0)
+			border_width = 3.5
+		if coord == hovered_coord:
+			border = Color(1, 1, 1, 0.95)
+			border_width = maxf(border_width, 2.5)
+			if drop_state == DropState.VALID:
+				border = Color(0.35, 1.0, 0.45)
+				border_width = 3.0
+			elif drop_state == DropState.INVALID:
+				border = Color(1.0, 0.35, 0.35)
+				border_width = 3.0
+		if coord == selected_coord:
+			border = Color(1, 0.85, 0.2)
+			border_width = 3.0
+		if fill.a <= 0.0 and border_width <= 0.0:
+			continue
 		var center := axial_to_pixel(coord)
 		var points := PackedVector2Array()
-		for i in range(6):
-			points.append(center + HexUtils.corner_offset(hex_size - 1.0, i))
-
-		var color: Color = TERRAIN_COLOR[terrain]
-		if show_deploy_zone and deploy_zone.has(coord):
-			color = color.lerp(Color(0.35, 0.6, 1.0), 0.45)
-		if reachable.has(coord):
-			color = color.lerp(Color.WHITE, 0.35)
-		if path.has(coord):
-			color = color.lerp(Color.YELLOW, 0.4)
-		if attack_targets.has(coord):
-			color = color.lerp(Color(1.0, 0.15, 0.1), 0.55)
-		draw_colored_polygon(points, color)
-
-		var outline_color := Color(0, 0, 0, 0.25)
-		var outline_width := 1.0
-		if coord == hovered_coord:
-			outline_color = Color(1, 1, 1, 0.9)
-			outline_width = 2.0
-			if drop_state == DropState.VALID:
-				outline_color = Color(0.3, 1.0, 0.4, 1.0)
-				outline_width = 3.0
-			elif drop_state == DropState.INVALID:
-				outline_color = Color(1.0, 0.3, 0.3, 1.0)
-				outline_width = 3.0
-		if coord == selected_coord:
-			outline_color = Color(1, 0.85, 0.2, 1.0)
-			outline_width = 3.0
-
-		var closed_points := points.duplicate()
-		closed_points.append(points[0])
-		draw_polyline(closed_points, outline_color, outline_width)
+		for i in 6:
+			points.append(center + HexUtils.corner_offset(hex_size - OVERLAY_INSET, i))
+		if fill.a > 0.0:
+			draw_colored_polygon(points, fill)
+		if border_width > 0.0:
+			points.append(points[0])
+			draw_polyline(points, border, border_width, true)

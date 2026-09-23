@@ -16,6 +16,7 @@ const UnitScene := preload("res://scenes/Unit.tscn")
 @onready var game_over_subtitle: Label = $UI/GameOver/Center/Box/Subtitle
 @onready var restart_button: Button = $UI/GameOver/Center/Box/RestartButton
 @onready var stage_label: Label = $UI/StageLabel
+@onready var terrain_label: Label = $UI/TerrainLabel
 @onready var upgrades_box: Control = $UI/GameOver/Center/Box/Upgrades
 @onready var upgrade_points_label: Label = $UI/GameOver/Center/Box/Upgrades/PointsLabel
 @onready var upgrade_grid: GridContainer = $UI/GameOver/Center/Box/Upgrades/Grid
@@ -39,6 +40,8 @@ var drag_unit: Unit = null
 var drag_origin: Vector2i = HexMap.NO_COORD
 
 var selected_unit: Unit = null
+## 目前的說明文字；滑鼠移到可攻擊敵人上時會暫時改顯示攻擊預測
+var current_info: String = ""
 var reachable_data: Dictionary = {}
 var is_animating: bool = false
 var is_dragging: bool = false
@@ -61,9 +64,9 @@ const ENEMY_STEP_DELAY := 0.35
 ## 佈署區為地圖最下方幾列
 const DEPLOY_ROWS := 3
 const ENEMY_TYPES := {
-	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "defense": 0, "crit_chance": 0.1},
-	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 5, "defense": 1, "crit_chance": 0.1, "radius": 29.0},
-	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "defense": 1, "crit_chance": 0.15, "radius": 33.0},
+	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "defense": 0, "crit_chance": 0.1, "hit_chance": 0.85},
+	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 5, "defense": 1, "crit_chance": 0.1, "hit_chance": 0.8, "radius": 29.0},
+	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "defense": 1, "crit_chance": 0.15, "hit_chance": 0.9, "radius": 33.0},
 }
 ## 每關的地圖半徑、出場敵人，以及過關後可分配的升級點數
 const STAGES := [
@@ -76,9 +79,10 @@ const UPGRADES := [
 	{"key": "attack", "label": "ATK", "per_point": 1},
 	{"key": "defense", "label": "DEF", "per_point": 1},
 	{"key": "crit_chance", "label": "CRIT", "per_point": 0.05},
+	{"key": "hit_chance", "label": "HIT", "per_point": 0.05},
 ]
 const PLAYER_ROSTER := [
-	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "defense": 0, "crit_chance": 0.2},
+	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "move_range": 3, "max_hp": 30, "attack": 6, "defense": 0, "crit_chance": 0.2, "hit_chance": 0.8},
 ]
 ## 佈署階段鏡頭縮放時，畫面上方保留給說明文字的高度（像素）
 const DEPLOY_TOP_MARGIN := 60.0
@@ -116,6 +120,7 @@ func _create_unit(stats: Dictionary) -> Unit:
 	unit.attack = stats["attack"]
 	unit.defense = stats["defense"]
 	unit.crit_chance = stats["crit_chance"]
+	unit.hit_chance = stats["hit_chance"]
 	unit.radius = stats.get("radius", unit.radius)
 	return unit
 
@@ -291,6 +296,14 @@ func _handle_hover() -> void:
 	var world_pos := get_global_mouse_position()
 	var coord := hex_map.pixel_to_axial(world_pos)
 	hex_map.hovered_coord = coord if hex_map.has_tile(coord) else HexMap.NO_COORD
+	terrain_label.text = hex_map.describe(coord) if hex_map.has_tile(coord) else ""
+
+	# 滑鼠停在可攻擊的敵人上時顯示攻擊預測
+	var hovered_unit := get_unit_at(coord) if hex_map.attack_targets.has(coord) else null
+	if phase == Phase.PLAYER_TURN and selected_unit != null and hovered_unit != null:
+		info_label.text = _attack_forecast(selected_unit, hovered_unit)
+	else:
+		info_label.text = current_info
 
 	if phase == Phase.DEPLOY:
 		hex_map.queue_redraw()
@@ -349,8 +362,9 @@ func _select_unit(unit: Unit) -> void:
 	hex_map.set_highlight(reachable_data["cost"], [])
 	var targets := _get_attack_targets(unit)
 	hex_map.set_attack_targets(targets)
-	var info := "%s selected (HP %d/%d, ATK %d, DEF %d, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
-		unit.unit_name, unit.hp, unit.max_hp, unit.attack, unit.defense, roundi(unit.crit_chance * 100), unit.move_range]
+	var info := "%s selected (HP %d/%d, ATK %d, DEF %d, HIT %d%%, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
+		unit.unit_name, unit.hp, unit.max_hp, unit.attack, unit.defense, roundi(unit.hit_chance * 100),
+		roundi(unit.crit_chance * 100), unit.move_range]
 	if not targets.is_empty():
 		info += ", or a red enemy to attack"
 	_update_info(info + ".")
@@ -478,7 +492,10 @@ func _enemy_act(enemy: Unit) -> void:
 		var best_cost := 0
 		for coord in cost_map.keys():
 			var dist := HexUtils.distance(coord, target.axial_coord)
-			if dist < best_dist or (dist == best_dist and cost_map[coord] < best_cost):
+			# 同距離時偏好有閃避加成的地形（森林），再來才是移動花費較低者
+			var better_cover: bool = dist == best_dist and hex_map.evasion(coord) > hex_map.evasion(best)
+			var same_cover: bool = dist == best_dist and hex_map.evasion(coord) == hex_map.evasion(best)
+			if dist < best_dist or better_cover or (same_cover and cost_map[coord] < best_cost):
 				best = coord
 				best_dist = dist
 				best_cost = cost_map[coord]
@@ -520,13 +537,16 @@ func _perform_attack(attacker: Unit, target: Unit) -> void:
 func _strike(attacker: Unit, target: Unit) -> void:
 	var home := attacker.position
 	var lunge := home.lerp(target.position, 0.4)
-	var is_crit := randf() < attacker.crit_chance
-	# 攻擊力扣掉防禦力（至少 1 點），爆擊再乘倍率
-	var damage := maxi(1, attacker.attack - target.defense) * (CRIT_MULTIPLIER if is_crit else 1)
+	var is_hit := randf() < _hit_chance(attacker, target)
+	var is_crit := is_hit and randf() < attacker.crit_chance
+	var damage := _base_damage(attacker, target) * (CRIT_MULTIPLIER if is_crit else 1)
 	attacker.z_index = 5
 	var tween := create_tween()
 	tween.tween_property(attacker, "position", lunge, 0.1).set_trans(Tween.TRANS_SINE)
 	tween.tween_callback(func() -> void:
+		if not is_hit:
+			_spawn_miss_text(target.position)
+			return
 		target.hp -= damage
 		_spawn_damage_number(target.position, damage, is_crit)
 		_flash(target)
@@ -537,6 +557,38 @@ func _strike(attacker: Unit, target: Unit) -> void:
 	tween.tween_interval(0.2)
 	await tween.finished
 	attacker.z_index = 0
+
+## 命中率 = 攻擊方命中 − 目標所在地形閃避，限制在 5%~100%
+func _hit_chance(attacker: Unit, target: Unit) -> float:
+	return clampf(attacker.hit_chance - hex_map.evasion(target.axial_coord), 0.05, 1.0)
+
+## 攻擊力扣掉防禦力，至少 1 點
+func _base_damage(attacker: Unit, target: Unit) -> int:
+	return maxi(1, attacker.attack - target.defense)
+
+## 攻擊預測，例如 "Attack Minion: HIT 65% · DMG 6 · CRIT 20%"
+func _attack_forecast(attacker: Unit, target: Unit) -> String:
+	return "Attack %s (HP %d/%d): HIT %d%% · DMG %d · CRIT %d%%" % [
+		target.unit_name, target.hp, target.max_hp, roundi(_hit_chance(attacker, target) * 100),
+		_base_damage(attacker, target), roundi(attacker.crit_chance * 100)]
+
+func _spawn_miss_text(pos: Vector2) -> void:
+	var label := Label.new()
+	label.text = "MISS"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 26)
+	label.add_theme_color_override("font_color", Color(0.85, 0.88, 0.92))
+	label.add_theme_color_override("font_outline_color", Color.BLACK)
+	label.add_theme_constant_override("outline_size", 5)
+	label.z_index = 20
+	label.size = Vector2(200, 0)
+	label.position = pos + Vector2(-100, -70)
+	add_child(label)
+	var tween := label.create_tween()
+	tween.set_parallel()
+	tween.tween_property(label, "position:x", label.position.x + 12, 0.5).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(label, "modulate:a", 0.0, 0.5).set_delay(0.2)
+	tween.chain().tween_callback(label.queue_free)
 
 func _flash(unit: Unit) -> void:
 	var tween := create_tween()
@@ -650,6 +702,7 @@ func _create_player_unit(index: int) -> Unit:
 		var key: String = upgrade["key"]
 		stats[key] += player_bonus.get(key, 0) * upgrade["per_point"]
 	stats["crit_chance"] = minf(stats["crit_chance"], 1.0)
+	stats["hit_chance"] = minf(stats["hit_chance"], 1.0)
 	return _create_unit(stats)
 
 # ---- 過關升級 ----
@@ -710,7 +763,7 @@ func _refresh_upgrades() -> void:
 		var after: float = current + added * upgrade["per_point"]
 		var label: Label = upgrade_value_labels[key]
 		var gain: float = added * upgrade["per_point"]
-		if key == "crit_chance":
+		if key in ["crit_chance", "hit_chance"]:
 			label.text = "%d%%" % roundi(minf(after, 1.0) * 100)
 			if added > 0:
 				label.text += "  (+%d%%)" % roundi(gain * 100)
@@ -738,5 +791,6 @@ func _animate_move(unit: Unit, move_path: Array[Vector2i]) -> void:
 	await tween.finished
 
 func _update_info(text: String) -> void:
+	current_info = text
 	if info_label:
 		info_label.text = text
