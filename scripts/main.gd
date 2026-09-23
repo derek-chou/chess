@@ -64,13 +64,13 @@ const ENEMY_STEP_DELAY := 0.35
 ## 佈署區為地圖最下方幾列
 const DEPLOY_ROWS := 3
 const ENEMY_TYPES := {
-	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 4, "defense": 0, "crit_chance": 0.1, "hit_chance": 0.85},
-	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 5, "defense": 1, "crit_chance": 0.1, "hit_chance": 0.8, "radius": 29.0},
-	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 5, "defense": 1, "crit_chance": 0.15, "hit_chance": 0.9, "radius": 33.0},
+	"minion": {"name": "Minion", "icon": preload("res://icons/monster.svg"), "move_range": 3, "max_hp": 12, "attack": 5, "defense": 0, "crit_chance": 0.1, "hit_chance": 0.85},
+	"brute": {"name": "Brute", "icon": preload("res://icons/brute.svg"), "move_range": 3, "max_hp": 18, "attack": 6, "defense": 1, "crit_chance": 0.1, "hit_chance": 0.8, "radius": 29.0},
+	"boss": {"name": "Boss", "icon": preload("res://icons/boss.svg"), "move_range": 3, "max_hp": 24, "attack": 6, "defense": 1, "crit_chance": 0.15, "hit_chance": 0.9, "radius": 33.0},
 }
 ## 每關的地圖半徑、出場敵人，以及過關後可分配的升級點數
 const STAGES := [
-	{"map_radius": 6, "enemies": ["minion", "minion", "minion"], "reward_points": 3},
+	{"map_radius": 6, "enemies": ["minion", "minion", "minion", "minion"], "reward_points": 3},
 	{"map_radius": 6, "enemies": ["minion", "minion", "minion", "boss"], "reward_points": 3},
 	{"map_radius": 7, "enemies": ["minion", "minion", "minion", "minion", "minion", "brute", "brute"], "reward_points": 3},
 ]
