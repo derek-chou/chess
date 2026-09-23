@@ -34,15 +34,17 @@ const DEPLOY_INFO := "Drag your unit from the bench onto the blue deploy zone. D
 const ATTACK_INFO := "Click a red enemy to attack, or click elsewhere to wait."
 const VICTORY_INFO := "Victory! All enemies defeated."
 const DEFEAT_INFO := "Defeat! All your units have fallen."
+## 爆擊傷害倍率
+const CRIT_MULTIPLIER := 2
 ## 敵方回合中每個動作之間的停頓（秒）
 const ENEMY_STEP_DELAY := 0.35
 
 ## 佈署區為地圖最下方幾列
 const DEPLOY_ROWS := 3
 const ENEMY_COUNT := 3
-const ENEMY_STATS := {"name": "Enemy", "icon": preload("res://icons/monster.svg"), "color": Color(0.85, 0.25, 0.25), "move_range": 3, "max_hp": 12, "attack": 4}
+const ENEMY_STATS := {"name": "Enemy", "icon": preload("res://icons/monster.svg"), "color": Color(0.85, 0.25, 0.25), "move_range": 3, "max_hp": 12, "attack": 4, "crit_chance": 0.1}
 const PLAYER_ROSTER := [
-	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "color": Color(0.2, 0.45, 0.85), "move_range": 3, "max_hp": 30, "attack": 6},
+	{"name": "Warrior", "icon": preload("res://icons/warrior.svg"), "color": Color(0.2, 0.45, 0.85), "move_range": 3, "max_hp": 30, "attack": 6, "crit_chance": 0.2},
 ]
 ## 佈署階段將鏡頭縮小，讓整張地圖與佈署欄同時可見
 const DEPLOY_ZOOM := 0.6
@@ -75,6 +77,7 @@ func _create_unit(stats: Dictionary) -> Unit:
 	unit.move_range = stats["move_range"]
 	unit.max_hp = stats["max_hp"]
 	unit.attack = stats["attack"]
+	unit.crit_chance = stats["crit_chance"]
 	return unit
 
 func _setup_bench() -> void:
@@ -301,8 +304,8 @@ func _select_unit(unit: Unit) -> void:
 	hex_map.set_highlight(reachable_data["cost"], [])
 	var targets := _get_attack_targets(unit)
 	hex_map.set_attack_targets(targets)
-	var info := "%s selected (HP %d/%d, ATK %d, MOV %d). Click a highlighted tile to move" % [
-		unit.unit_name, unit.hp, unit.max_hp, unit.attack, unit.move_range]
+	var info := "%s selected (HP %d/%d, ATK %d, CRIT %d%%, MOV %d). Click a highlighted tile to move" % [
+		unit.unit_name, unit.hp, unit.max_hp, unit.attack, roundi(unit.crit_chance * 100), unit.move_range]
 	if not targets.is_empty():
 		info += ", or a red enemy to attack"
 	_update_info(info + ".")
@@ -472,13 +475,17 @@ func _perform_attack(attacker: Unit, target: Unit) -> void:
 func _strike(attacker: Unit, target: Unit) -> void:
 	var home := attacker.position
 	var lunge := home.lerp(target.position, 0.4)
+	var is_crit := randf() < attacker.crit_chance
+	var damage := attacker.attack * (CRIT_MULTIPLIER if is_crit else 1)
 	attacker.z_index = 5
 	var tween := create_tween()
 	tween.tween_property(attacker, "position", lunge, 0.1).set_trans(Tween.TRANS_SINE)
 	tween.tween_callback(func() -> void:
-		target.hp -= attacker.attack
-		_spawn_damage_number(target.position, attacker.attack)
+		target.hp -= damage
+		_spawn_damage_number(target.position, damage, is_crit)
 		_flash(target)
+		if is_crit:
+			_shake_camera()
 	)
 	tween.tween_property(attacker, "position", home, 0.15).set_trans(Tween.TRANS_SINE)
 	tween.tween_interval(0.2)
@@ -490,15 +497,25 @@ func _flash(unit: Unit) -> void:
 	tween.tween_property(unit, "modulate", Color(1, 0.4, 0.4), 0.08)
 	tween.tween_property(unit, "modulate", Color.WHITE, 0.15)
 
-func _spawn_damage_number(pos: Vector2, amount: int) -> void:
+func _shake_camera() -> void:
+	var tween := create_tween()
+	for i in 4:
+		var offset := Vector2(randf_range(-1, 1), randf_range(-1, 1)) * 8.0 / camera.zoom.x
+		tween.tween_property(camera, "offset", offset, 0.04)
+	tween.tween_property(camera, "offset", Vector2.ZERO, 0.04)
+
+func _spawn_damage_number(pos: Vector2, amount: int, is_crit: bool) -> void:
 	var label := Label.new()
-	label.text = "-%d" % amount
-	label.add_theme_font_size_override("font_size", 30)
-	label.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
+	label.text = ("CRIT! -%d" if is_crit else "-%d") % amount
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 40 if is_crit else 30)
+	label.add_theme_color_override("font_color", Color(1, 0.45, 0.1) if is_crit else Color(1, 0.9, 0.3))
 	label.add_theme_color_override("font_outline_color", Color.BLACK)
-	label.add_theme_constant_override("outline_size", 5)
+	label.add_theme_constant_override("outline_size", 6 if is_crit else 5)
 	label.z_index = 20
-	label.position = pos + Vector2(-14, -70)
+	# 固定寬度並置中，讓不同長度的文字都對齊單位中心
+	label.size = Vector2(200, 0)
+	label.position = pos + Vector2(-100, -80 if is_crit else -70)
 	add_child(label)
 	var tween := label.create_tween()
 	tween.set_parallel()

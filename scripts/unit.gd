@@ -5,6 +5,8 @@ extends Node2D
 @export var move_range: int = 3
 @export var max_hp: int = 10
 @export var attack: int = 3
+## 爆擊機率（0~1）
+@export_range(0.0, 1.0) var crit_chance: float = 0.0
 @export var team_color: Color = Color(0.2, 0.45, 0.85)
 @export var radius: float = 26.0
 @export var is_enemy: bool = false
